@@ -54,7 +54,7 @@ class PTConfig:
     dataset_name: str = field(default="./data/fsm_s3-10_l5-20_n10000")
     dataset_subset: str = field(default=None)
     name: str = field(
-        default="forscore",
+        default="forescore",
     )
     system_prompt: str = field(
         default="""You are an expert at simulating finite state machines (FSMs). When given an FSM definition in DOT notation and a sequence of inputs, you need to determine the final state after processing the entire sequence.
@@ -153,7 +153,7 @@ def main():
     # os.environ["LOCAL_RANK"] = "0"
     # os.environ["MASTER_ADDR"] = "localhost"
     # os.environ["MASTER_PORT"] = "12356"
-    os.environ["WANDB_PROJECT"] = "forscore"
+    os.environ["WANDB_PROJECT"] = "forescore"
 
     # Set up logging
     logger = logging.getLogger(__name__)

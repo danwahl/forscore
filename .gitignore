@@ -12,7 +12,7 @@ data/
 test_*.py
 
 # Training outputs
-forscore/
+forescore/
 checkpoints/
 logs/
 

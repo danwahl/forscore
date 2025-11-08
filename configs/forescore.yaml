@@ -1,4 +1,4 @@
-name: forscore
+name: forescore
 
 # Model configs from trl
 model_name_or_path: Qwen/Qwen2.5-3B-Instruct

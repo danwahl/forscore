@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=forscore_train
+#SBATCH --job-name=forescore_train
 #SBATCH --partition=general
 #SBATCH --account=general_group
 #SBATCH --output=output-%x.%j
@@ -18,17 +18,17 @@
 
 ulimit -s unlimited
 
-CONDA_ENV="forscore"
+CONDA_ENV="forescore"
 source /net/scratch/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate $CONDA_ENV
 echo "START TIME: $(date)"
 echo "PYTHON ENV: $(which python)"
 
-export CONFIG="forscore"
+export CONFIG="forescore"
 export HF_TOKEN="" # Set this
 export WANDB_API_KEY=""  # Set this
 export WANDB_CACHE_DIR="/net/scratch/$USER/wandb"
-export BASE_DIR="/net/scratch/$USER/post-training/forscore"
+export BASE_DIR="/net/scratch/$USER/post-training/forescore"
 
 wandb login $WANDB_API_KEY
 
