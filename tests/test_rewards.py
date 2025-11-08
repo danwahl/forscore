@@ -14,8 +14,9 @@ import math
 
 from rewards import (
     parse_full_response,
+    parse_subset_from_answer,
     format_reward_func,
-    final_state_correct_reward_func,
+    subset_correct_reward_func,
     token_count_reward_func,
     PAD_TOKEN
 )
@@ -232,27 +233,184 @@ class TestFormatRewardFunc(unittest.TestCase):
         self.assertEqual(rewards[3], 0.0)
 
 
-class TestFinalStateCorrectRewardFunc(unittest.TestCase):
-    """Test final state correctness reward function."""
+class TestParseSubsetFromAnswer(unittest.TestCase):
+    """Test subset parsing from answer text."""
 
-    def test_correct_answer(self):
-        """Test correct final state gets full reward."""
+    def test_list_format(self):
+        """Test parsing list format [3, 7, 12]."""
+        result = parse_subset_from_answer("[3, 7, 12]")
+        self.assertEqual(result, [3, 7, 12])
+
+    def test_list_format_no_spaces(self):
+        """Test parsing list format without spaces [3,7,12]."""
+        result = parse_subset_from_answer("[3,7,12]")
+        self.assertEqual(result, [3, 7, 12])
+
+    def test_comma_separated(self):
+        """Test parsing comma-separated format."""
+        result = parse_subset_from_answer("3, 7, 12")
+        self.assertEqual(result, [3, 7, 12])
+
+    def test_comma_separated_no_spaces(self):
+        """Test parsing comma-separated without spaces."""
+        result = parse_subset_from_answer("3,7,12")
+        self.assertEqual(result, [3, 7, 12])
+
+    def test_space_separated(self):
+        """Test parsing space-separated format."""
+        result = parse_subset_from_answer("3 7 12")
+        self.assertEqual(result, [3, 7, 12])
+
+    def test_single_number(self):
+        """Test parsing single number."""
+        result = parse_subset_from_answer("42")
+        self.assertEqual(result, [42])
+
+    def test_with_extra_whitespace(self):
+        """Test parsing with extra whitespace."""
+        result = parse_subset_from_answer("  [ 3 ,  7 ,  12 ]  ")
+        self.assertEqual(result, [3, 7, 12])
+
+    def test_large_numbers(self):
+        """Test parsing large numbers."""
+        result = parse_subset_from_answer("[100, 250, 567]")
+        self.assertEqual(result, [100, 250, 567])
+
+    def test_empty_string(self):
+        """Test parsing empty string returns None."""
+        result = parse_subset_from_answer("")
+        self.assertIsNone(result)
+
+    def test_no_numbers(self):
+        """Test parsing text with no numbers returns None."""
+        result = parse_subset_from_answer("no numbers here")
+        self.assertIsNone(result)
+
+    def test_empty_brackets(self):
+        """Test parsing empty brackets returns None."""
+        result = parse_subset_from_answer("[]")
+        self.assertIsNone(result)
+
+
+class TestSubsetCorrectRewardFunc(unittest.TestCase):
+    """Test subset sum correctness reward function."""
+
+    def test_correct_subset(self):
+        """Test correct subset gets full reward."""
         prompts = ["prompt"]
-        completions = [[{"content": "<think>reasoning</think><answer>s3</answer>"}]]
-        final_state = ["s3"]
+        completions = [[{"content": "<think>reasoning</think><answer>[3, 7]</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [10]
 
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
 
         self.assertEqual(len(rewards), 1)
         self.assertEqual(rewards[0], 1.0)
 
-    def test_incorrect_answer(self):
-        """Test incorrect final state gets no reward."""
+    def test_correct_subset_different_format(self):
+        """Test correct subset in comma-separated format."""
         prompts = ["prompt"]
-        completions = [[{"content": "<think>reasoning</think><answer>s1</answer>"}]]
-        final_state = ["s2"]
+        completions = [[{"content": "<think>reasoning</think><answer>3, 7</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [10]
 
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 1.0)
+
+    def test_incorrect_sum(self):
+        """Test subset with incorrect sum gets no reward."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>[3, 12]</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [10]  # 3 + 12 = 15, not 10
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 0.0)
+
+    def test_element_not_in_list(self):
+        """Test subset with element not from original list gets no reward."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>[3, 99]</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [102]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 0.0)
+
+    def test_duplicate_elements(self):
+        """Test subset using same element twice gets no reward."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>[7, 7]</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [14]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 0.0)
+
+    def test_duplicate_elements_in_source(self):
+        """Test handling of duplicates in source list."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>[5, 5]</answer>"}]]
+        numbers = [[5, 5, 10, 20]]  # Two 5s available
+        target = [10]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 1.0)  # Valid: can use both 5s
+
+    def test_too_many_duplicates(self):
+        """Test using element more times than available."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>[5, 5, 5]</answer>"}]]
+        numbers = [[5, 5, 10, 20]]  # Only two 5s available
+        target = [15]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 0.0)
+
+    def test_missing_answer(self):
+        """Test missing answer gets no reward."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think>"}]]
+        numbers = [[3, 7, 12]]
+        target = [10]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 0.0)
+
+    def test_malformed_answer(self):
+        """Test malformed answer gets no reward."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>not a subset</answer>"}]]
+        numbers = [[3, 7, 12]]
+        target = [10]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
+
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(rewards[0], 0.0)
+
+    def test_empty_subset(self):
+        """Test empty subset gets no reward."""
+        prompts = ["prompt"]
+        completions = [[{"content": "<think>reasoning</think><answer>[]</answer>"}]]
+        numbers = [[3, 7, 12]]
+        target = [10]
+
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
 
         self.assertEqual(len(rewards), 1)
         self.assertEqual(rewards[0], 0.0)
@@ -261,77 +419,61 @@ class TestFinalStateCorrectRewardFunc(unittest.TestCase):
         """Test multiple responses with varying correctness."""
         prompts = ["p1", "p2", "p3"]
         completions = [
-            [{"content": "<think>a</think><answer>s1</answer>"}],
-            [{"content": "<think>b</think><answer>s2</answer>"}],
-            [{"content": "<think>c</think><answer>s3</answer>"}]
+            [{"content": "<think>a</think><answer>[3, 7]</answer>"}],      # Correct: 3+7=10
+            [{"content": "<think>b</think><answer>[12, 25]</answer>"}],    # Incorrect: 12+25=37≠50
+            [{"content": "<think>c</think><answer>[7, 12, 25]</answer>"}]  # Correct: 7+12+25=44
         ]
-        final_state = ["s1", "s5", "s3"]
+        numbers = [[3, 7, 12, 25], [12, 25, 50], [7, 12, 25, 50]]
+        target = [10, 50, 44]
 
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
 
         self.assertEqual(len(rewards), 3)
-        self.assertEqual(rewards[0], 1.0)  # s1 == s1
-        self.assertEqual(rewards[1], 0.0)  # s2 != s5
-        self.assertEqual(rewards[2], 1.0)  # s3 == s3
+        self.assertEqual(rewards[0], 1.0)
+        self.assertEqual(rewards[1], 0.0)
+        self.assertEqual(rewards[2], 1.0)
 
-    def test_missing_answer(self):
-        """Test missing answer gets no reward."""
+    def test_single_element_subset(self):
+        """Test subset with single element."""
         prompts = ["prompt"]
-        completions = [[{"content": "<think>reasoning</think>"}]]
-        final_state = ["s1"]
+        completions = [[{"content": "<think>reasoning</think><answer>[25]</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [25]
 
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
-
-        self.assertEqual(len(rewards), 1)
-        self.assertEqual(rewards[0], 0.0)
-
-    def test_malformed_response(self):
-        """Test malformed response gets no reward."""
-        prompts = ["prompt"]
-        completions = [[{"content": "bad response"}]]
-        final_state = ["s1"]
-
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
-
-        self.assertEqual(len(rewards), 1)
-        self.assertEqual(rewards[0], 0.0)
-
-    def test_whitespace_in_answer(self):
-        """Test answer with extra whitespace is trimmed correctly."""
-        prompts = ["prompt"]
-        completions = [[{"content": "<think>reasoning</think><answer>  s2  </answer>"}]]
-        final_state = ["s2"]
-
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
 
         self.assertEqual(len(rewards), 1)
         self.assertEqual(rewards[0], 1.0)
 
-    def test_case_sensitive_matching(self):
-        """Test state matching is case-sensitive."""
+    def test_alternative_valid_solution(self):
+        """Test that any valid subset is accepted, not just the generated one."""
+        # For non-super-increasing, there might be multiple solutions
         prompts = ["prompt"]
-        completions = [[{"content": "<think>reasoning</think><answer>S1</answer>"}]]
-        final_state = ["s1"]
+        # Original solution was [2, 3], but [1, 4] also works
+        completions = [[{"content": "<think>reasoning</think><answer>[1, 4]</answer>"}]]
+        numbers = [[1, 2, 3, 4]]
+        target = [5]  # Both [1,4] and [2,3] sum to 5
 
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
 
         self.assertEqual(len(rewards), 1)
-        self.assertEqual(rewards[0], 0.0)
+        self.assertEqual(rewards[0], 1.0)
 
-    def test_different_state_formats(self):
-        """Test various state naming formats."""
-        prompts = ["p1", "p2", "p3"]
+    def test_order_doesnt_matter(self):
+        """Test that order of elements doesn't matter."""
+        prompts = ["p1", "p2"]
         completions = [
-            [{"content": "<think>a</think><answer>s10</answer>"}],
-            [{"content": "<think>b</think><answer>state_2</answer>"}],
-            [{"content": "<think>c</think><answer>q0</answer>"}]
+            [{"content": "<think>a</think><answer>[3, 7, 12]</answer>"}],
+            [{"content": "<think>b</think><answer>[12, 3, 7]</answer>"}]  # Same elements, different order
         ]
-        final_state = ["s10", "state_2", "q0"]
+        numbers = [[3, 7, 12, 25], [3, 7, 12, 25]]
+        target = [22, 22]
 
-        rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        rewards = subset_correct_reward_func(prompts, completions, target, numbers)
 
-        self.assertEqual(len(rewards), 3)
-        self.assertTrue(all(r == 1.0 for r in rewards))
+        self.assertEqual(len(rewards), 2)
+        self.assertEqual(rewards[0], 1.0)
+        self.assertEqual(rewards[1], 1.0)
 
 
 class TestTokenCountRewardFunc(unittest.TestCase):
@@ -461,13 +603,14 @@ class TestIntegration(unittest.TestCase):
 
     def test_perfect_response(self):
         """Test a perfect response gets full rewards from all functions."""
-        prompts = ["What is the final state?"]
-        completions = [[{"content": "<think>Start at s1, apply a, end at s2</think><answer>s2</answer>"}]]
-        final_state = ["s2"]
+        prompts = ["Find subset summing to 10"]
+        completions = [[{"content": "<think>I need 3 and 7 to get 10</think><answer>[3, 7]</answer>"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [10]
         completion_ids = [[1] * 100]  # Short response
 
         format_rewards = format_reward_func(completions)
-        correctness_rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        correctness_rewards = subset_correct_reward_func(prompts, completions, target, numbers)
         length_rewards = token_count_reward_func(prompts, completion_ids, target_count=512)
 
         self.assertEqual(format_rewards[0], 1.0)
@@ -476,13 +619,14 @@ class TestIntegration(unittest.TestCase):
 
     def test_badly_formatted_response(self):
         """Test badly formatted response fails all checks."""
-        prompts = ["What is the final state?"]
-        completions = [[{"content": "The answer is s2"}]]
-        final_state = ["s2"]
+        prompts = ["Find subset summing to 10"]
+        completions = [[{"content": "The answer is 3 and 7"}]]
+        numbers = [[3, 7, 12, 25]]
+        target = [10]
         completion_ids = [[1] * 100]
 
         format_rewards = format_reward_func(completions)
-        correctness_rewards = final_state_correct_reward_func(prompts, completions, final_state)
+        correctness_rewards = subset_correct_reward_func(prompts, completions, target, numbers)
         length_rewards = token_count_reward_func(prompts, completion_ids, target_count=512)
 
         self.assertEqual(format_rewards[0], 0.0)

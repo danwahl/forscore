@@ -1,220 +1,134 @@
 #!/usr/bin/env python3
 """
-Generate FSM traversal datasets for training language models.
+Generate subset sum datasets for training language models.
 
-This script generates random finite state machines using AALpy library
-along with input sequences and their corresponding final states.
+This script generates super-increasing sequences with random subsets that
+sum to a target value. Super-increasing sequences guarantee unique solutions.
 """
 
 import argparse
 import random
-import tempfile
-import os
 from pathlib import Path
 from typing import List, Tuple
 from datasets import Dataset
-from aalpy.utils import generate_random_dfa
 
 
-def generate_fsm(num_states: int, alphabet: List[str]):
+def generate_super_increasing_sequence(
+    length: int, start_range: Tuple[int, int] = (1, 10), growth_range: Tuple[int, int] = (1, 20)
+) -> List[int]:
     """
-    Generate a random FSM with specified number of states using AALpy.
+    Generate a super-increasing sequence.
+
+    A sequence is super-increasing if each element is greater than the sum of
+    all previous elements. This property guarantees a unique solution for any
+    achievable target sum.
 
     Args:
-        num_states: Number of states in the FSM
-        alphabet: List of input symbols
+        length: Number of elements in the sequence
+        start_range: Range for the first element
+        growth_range: Range for growth beyond minimum value
 
     Returns:
-        AALpy DFA object
+        Super-increasing sequence as a list of integers
     """
-    # AALpy guarantees all states are reachable when compute_prefixes=True
-    # We set num_accepting_states to 1 (AALpy requires at least 1)
-    # but we ignore accepting states in our traversal problems
-    dfa = generate_random_dfa(
-        alphabet=alphabet,
-        num_states=num_states,
-        num_accepting_states=1,
-        compute_prefixes=True  # Ensures all states are reachable
-    )
-    return dfa
+    sequence = [random.randint(*start_range)]
 
-
-def fsm_to_dot(dfa) -> str:
-    """
-    Convert AALpy DFA to simplified DOT notation for traversal problems.
-
-    We simplify AALpy's DOT format by:
-    - Using "Start" instead of "__start0" for the initial state marker
-    - Removing accepting state annotations (doublecircle) since we only care about traversal
-    - Using consistent state naming
-
-    Args:
-        dfa: AALpy DFA object
-
-    Returns:
-        DOT notation string
-    """
-    lines = ["digraph FSM {", "  rankdir=LR;", "  node [shape=circle];", ""]
-
-    # Initial state marker
-    lines.append("  Start [shape=point];")
-    lines.append(f"  Start -> {dfa.initial_state.state_id};")
-    lines.append("")
-
-    # Transitions
-    # Group transitions by (src, dst) pair to combine labels
-    edge_labels = {}
-    for state in dfa.states:
-        for symbol, next_state in state.transitions.items():
-            key = (state.state_id, next_state.state_id)
-            if key not in edge_labels:
-                edge_labels[key] = []
-            edge_labels[key].append(symbol)
-
-    # Write edges with combined labels
-    for (src, dst), symbols in sorted(edge_labels.items()):
-        label = ",".join(sorted(symbols))
-        lines.append(f'  {src} -> {dst} [label="{label}"];')
-
-    lines.append("}")
-    return "\n".join(lines)
-
-
-def simulate_fsm(dfa, sequence: List[str]) -> Tuple[str, List[str]]:
-    """
-    Simulate FSM on an input sequence.
-
-    Args:
-        dfa: AALpy DFA object
-        sequence: List of input symbols
-
-    Returns:
-        Tuple of (final_state, trace) where trace is list of states visited
-    """
-    current_state = dfa.initial_state
-    trace = [current_state.state_id]
-
-    for symbol in sequence:
-        if symbol not in current_state.transitions:
-            # No transition defined - stay in current state
-            # This shouldn't happen with AALpy DFAs since they're complete,
-            # but we handle it for robustness
-            pass
-        else:
-            current_state = current_state.transitions[symbol]
-        trace.append(current_state.state_id)
-
-    return current_state.state_id, trace
-
-
-def generate_sequence(dfa, length: int) -> List[str]:
-    """
-    Generate a random input sequence that is valid for the FSM.
-
-    Args:
-        dfa: AALpy DFA object
-        length: Length of sequence to generate
-
-    Returns:
-        List of input symbols
-    """
-    sequence = []
-    current_state = dfa.initial_state
-    alphabet = dfa.get_input_alphabet()
-
-    for _ in range(length):
-        # Get available transitions from current state
-        available_symbols = list(current_state.transitions.keys())
-
-        if not available_symbols:
-            # No outgoing transitions - just pick random symbol from alphabet
-            symbol = random.choice(alphabet)
-        else:
-            # Pick a random available transition
-            symbol = random.choice(available_symbols)
-
-        sequence.append(symbol)
-
-        # Update current state
-        if symbol in current_state.transitions:
-            current_state = current_state.transitions[symbol]
+    for _ in range(1, length):
+        # Each element must be > sum of all previous elements
+        min_val = sum(sequence) + 1
+        max_val = min_val + random.randint(*growth_range)
+        sequence.append(random.randint(min_val, max_val))
 
     return sequence
 
 
-def format_problem(dfa, sequence: List[str]) -> str:
+def select_random_subset(
+    sequence: List[int], subset_size_range: Tuple[int, int]
+) -> List[int]:
     """
-    Format the FSM and sequence as a problem statement.
+    Select a random subset from the sequence.
 
     Args:
-        dfa: AALpy DFA object
-        sequence: Input sequence
+        sequence: The super-increasing sequence
+        subset_size_range: (min, max) size of subset to select
+
+    Returns:
+        Random subset as a list of integers
+    """
+    min_size, max_size = subset_size_range
+    # Ensure we don't try to select more elements than available
+    # and leave at least 1 element out
+    max_size = min(max_size, len(sequence) - 1)
+    max_size = max(max_size, min_size)  # Ensure max >= min
+
+    subset_size = random.randint(min_size, min(max_size, len(sequence)))
+    indices = sorted(random.sample(range(len(sequence)), subset_size))
+    return [sequence[i] for i in indices]
+
+
+def format_problem(numbers: List[int], target: int) -> str:
+    """
+    Format the subset sum problem as a string.
+
+    Args:
+        numbers: The list of available numbers
+        target: The target sum to find
 
     Returns:
         Formatted problem string
     """
-    dot = fsm_to_dot(dfa)
-    sequence_str = ", ".join(sequence)
+    return f"""Given the list: {numbers}
 
-    problem = f"""{dot}
+Find a subset that sums to {target}
 
-Starting from the initial state, process this sequence of inputs:
-{sequence_str}
-
-What is the final state?"""
-
-    return problem
+What subset of numbers sums to exactly {target}?"""
 
 
 def generate_dataset(
     num_examples: int,
-    num_states_range: Tuple[int, int],
     sequence_length_range: Tuple[int, int],
-    alphabet: List[str],
+    subset_size_range: Tuple[int, int],
+    start_range: Tuple[int, int],
+    growth_range: Tuple[int, int],
     seed: int = 42
 ) -> Dataset:
     """
-    Generate a dataset of FSM traversal problems.
+    Generate a dataset of subset sum problems.
 
     Args:
         num_examples: Number of examples to generate
-        num_states_range: (min, max) number of states
-        sequence_length_range: (min, max) sequence length
-        alphabet: List of input symbols
+        sequence_length_range: (min, max) length of super-increasing sequences
+        subset_size_range: (min, max) size of subsets to select
+        start_range: Range for the first element of sequences
+        growth_range: Range for growth beyond minimum value
         seed: Random seed for reproducibility
 
     Returns:
         HuggingFace Dataset
     """
     random.seed(seed)
-
     examples = []
 
     for i in range(num_examples):
-        # Sample complexity parameters
-        num_states = random.randint(*num_states_range)
+        # Generate super-increasing sequence
         seq_length = random.randint(*sequence_length_range)
+        numbers = generate_super_increasing_sequence(seq_length, start_range, growth_range)
 
-        # Generate FSM using AALpy
-        dfa = generate_fsm(num_states, alphabet)
-
-        # Generate sequence
-        sequence = generate_sequence(dfa, seq_length)
-
-        # Simulate to get answer
-        final_state, trace = simulate_fsm(dfa, sequence)
+        # Select random subset as solution
+        solution = select_random_subset(numbers, subset_size_range)
+        target = sum(solution)
 
         # Format problem
-        problem = format_problem(dfa, sequence)
+        problem = format_problem(numbers, target)
 
         # Create example
         example = {
             "problem": problem,
-            "sequence": sequence,
-            "final_state": final_state,
-            "trace": trace,
-            "num_states": num_states,
+            "numbers": numbers,
+            "target": target,
+            "solution": solution,  # The subset that sums to target
             "sequence_length": seq_length,
+            "subset_size": len(solution),
         }
 
         examples.append(example)
@@ -227,7 +141,7 @@ def generate_dataset(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate FSM traversal datasets",
+        description="Generate subset sum datasets",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
@@ -236,20 +150,6 @@ def main():
         type=int,
         default=10000,
         help="Number of examples to generate"
-    )
-
-    parser.add_argument(
-        "--min-states",
-        type=int,
-        default=3,
-        help="Minimum number of states"
-    )
-
-    parser.add_argument(
-        "--max-states",
-        type=int,
-        default=10,
-        help="Maximum number of states"
     )
 
     parser.add_argument(
@@ -262,15 +162,50 @@ def main():
     parser.add_argument(
         "--max-sequence-length",
         type=int,
-        default=20,
+        default=15,
         help="Maximum sequence length"
     )
 
     parser.add_argument(
-        "--alphabet",
-        type=str,
-        default="a,b",
-        help="Comma-separated list of input symbols"
+        "--min-subset-size",
+        type=int,
+        default=2,
+        help="Minimum subset size"
+    )
+
+    parser.add_argument(
+        "--max-subset-size",
+        type=int,
+        default=10,
+        help="Maximum subset size"
+    )
+
+    parser.add_argument(
+        "--start-range-min",
+        type=int,
+        default=1,
+        help="Minimum value for first element"
+    )
+
+    parser.add_argument(
+        "--start-range-max",
+        type=int,
+        default=10,
+        help="Maximum value for first element"
+    )
+
+    parser.add_argument(
+        "--growth-range-min",
+        type=int,
+        default=1,
+        help="Minimum growth beyond required minimum"
+    )
+
+    parser.add_argument(
+        "--growth-range-max",
+        type=int,
+        default=20,
+        help="Maximum growth beyond required minimum"
     )
 
     parser.add_argument(
@@ -296,29 +231,28 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse alphabet
-    alphabet = [s.strip() for s in args.alphabet.split(",")]
-
     # Generate dataset name if not provided
     if args.dataset_name is None:
-        dataset_name = f"fsm_s{args.min_states}-{args.max_states}_l{args.min_sequence_length}-{args.max_sequence_length}_n{args.num_examples}"
+        dataset_name = f"subset_sum_l{args.min_sequence_length}-{args.max_sequence_length}_s{args.min_subset_size}-{args.max_subset_size}_n{args.num_examples}"
     else:
         dataset_name = args.dataset_name
 
     print(f"Generating dataset: {dataset_name}")
     print(f"  Examples: {args.num_examples}")
-    print(f"  States: {args.min_states}-{args.max_states}")
     print(f"  Sequence length: {args.min_sequence_length}-{args.max_sequence_length}")
-    print(f"  Alphabet: {alphabet}")
+    print(f"  Subset size: {args.min_subset_size}-{args.max_subset_size}")
+    print(f"  Start range: {args.start_range_min}-{args.start_range_max}")
+    print(f"  Growth range: {args.growth_range_min}-{args.growth_range_max}")
     print(f"  Seed: {args.seed}")
     print()
 
     # Generate dataset
     dataset = generate_dataset(
         num_examples=args.num_examples,
-        num_states_range=(args.min_states, args.max_states),
         sequence_length_range=(args.min_sequence_length, args.max_sequence_length),
-        alphabet=alphabet,
+        subset_size_range=(args.min_subset_size, args.max_subset_size),
+        start_range=(args.start_range_min, args.start_range_max),
+        growth_range=(args.growth_range_min, args.growth_range_max),
         seed=args.seed
     )
 
@@ -335,8 +269,9 @@ def main():
     print("="*80)
     sample = dataset[0]
     print(sample["problem"])
-    print(f"\nAnswer: {sample['final_state']}")
-    print(f"Trace: {' → '.join(sample['trace'])}")
+    print(f"\nSolution: {sample['solution']}")
+    print(f"Target sum: {sample['target']}")
+    print(f"Verification: sum({sample['solution']}) = {sum(sample['solution'])}")
     print("="*80)
 
     print(f"\n✓ Dataset saved successfully!")
