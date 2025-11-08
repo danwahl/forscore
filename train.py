@@ -7,7 +7,7 @@ import torch
 import transformers
 
 from dataclasses import dataclass, field
-from datasets import load_dataset, Dataset
+from datasets import Dataset
 from datetime import datetime
 from peft import LoraConfig
 from transformers import (
@@ -52,7 +52,7 @@ class PTConfig:
     {{- '<|im_start|>assistant\n' -}}
 {%- endif -%}"""
     )
-    dataset_name: str = field(default="./fsm_datasets/fsm_s3-10_l5-20_n10000")
+    dataset_name: str = field(default="./data/fsm_s3-10_l5-20_n10000")
     dataset_subset: str = field(default=None)
     name: str = field(
         default="forscore",
@@ -66,29 +66,45 @@ Think through the problem step-by-step:
 3. Follow the transitions according to the FSM's edge labels
 4. Track your current state after each transition
 
-Here's an example response showing the required XML format:
+Here's an example showing the input format and required response:
 
+Input:
+digraph FSM {
+  rankdir=LR;
+  node [shape=circle];
+
+  Start [shape=point];
+  Start -> S0;
+
+  S0 -> S1 [label="a"];
+  S0 -> S2 [label="b"];
+  S1 -> S0 [label="a"];
+  S1 -> S3 [label="b"];
+  S2 -> S3 [label="a"];
+  S2 -> S0 [label="b"];
+  S3 -> S2 [label="a"];
+  S3 -> S1 [label="b"];
+}
+
+Starting from the initial state, process this sequence of inputs:
+b, a, b, a, b
+
+What is the final state?
+
+Response:
 <think>
-Looking at the FSM definition:
+Looking at the FSM:
 - Initial state: Start → S0
-- Transitions:
-  - S0 → S1 [label="a"]
-  - S0 → S2 [label="b"]
-  - S1 → S0 [label="a"]
-  - S1 → S3 [label="b"]
-  - S2 → S3 [label="a"]
-  - S2 → S0 [label="b"]
-  - S3 → S2 [label="a"]
-  - S3 → S1 [label="b"]
+- Transitions define how each state responds to inputs 'a' and 'b'
 
 Processing the sequence: b, a, b, a, b
 
 Step 1: Start at S0
-Step 2: Input 'b' → transition S0 → S2 (current state: S2)
-Step 3: Input 'a' → transition S2 → S3 (current state: S3)
-Step 4: Input 'b' → transition S3 → S1 (current state: S1)
-Step 5: Input 'a' → transition S1 → S0 (current state: S0)
-Step 6: Input 'b' → transition S0 → S2 (current state: S2)
+Step 2: Input 'b' → S0 -> S2 [label="b"] → now at S2
+Step 3: Input 'a' → S2 -> S3 [label="a"] → now at S3
+Step 4: Input 'b' → S3 -> S1 [label="b"] → now at S1
+Step 5: Input 'a' → S1 -> S0 [label="a"] → now at S0
+Step 6: Input 'b' → S0 -> S2 [label="b"] → now at S2
 
 Final state after processing all inputs: S2
 </think>
@@ -197,22 +213,13 @@ def main():
     training_args.run_name = f"{pt_args.name}_{formatted_datetime}"
 
     # Load and preprocess dataset (tokenization is handled by GRPO Trainer)
-    # Check if dataset_name is a local path or HuggingFace dataset
-    if os.path.exists(pt_args.dataset_name):
-        # Load from local disk
-        logger.info(f"Loading dataset from local path: {pt_args.dataset_name}")
-        train_dataset = Dataset.load_from_disk(pt_args.dataset_name)
-    else:
-        # Load from HuggingFace
-        logger.info(f"Loading dataset from HuggingFace: {pt_args.dataset_name}")
-        streaming_dataset = (
-            load_dataset(
-                pt_args.dataset_name, pt_args.dataset_subset, split="train", streaming=True
-            )
-            .shuffle(seed=training_args.seed)
-            .take(10000)
-        )
-        train_dataset = Dataset.from_list(list(streaming_dataset))
+    if not os.path.exists(pt_args.dataset_name):
+        logger.error(f"Dataset not found at: {pt_args.dataset_name}")
+        logger.error("Please generate the dataset first using generate.py")
+        sys.exit(1)
+
+    logger.info(f"Loading dataset from local path: {pt_args.dataset_name}")
+    train_dataset = Dataset.load_from_disk(pt_args.dataset_name)
 
     # Preprocess dataset
     train_dataset = train_dataset.map(

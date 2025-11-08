@@ -29,7 +29,7 @@ logging_steps: 1
 logging_strategy: steps
 lr_scheduler_type: cosine
 warmup_ratio: 0.1
-max_completion_length: 1024  # FSM tasks should need less than chess
+max_completion_length: 1536  # 512 + 1536 = 2048 total max
 # max_grad_norm: 0.1
 max_prompt_length: 512  # FSM problems with DOT notation need more space
 max_steps: 5000 # 10000 prompts, 2 prompts per step

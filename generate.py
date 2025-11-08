@@ -295,7 +295,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./fsm_datasets",
+        default="./data",
         help="Output directory for datasets"
     )
 
