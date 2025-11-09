@@ -20,7 +20,7 @@ from trl import GRPOConfig, GRPOTrainer, ModelConfig, TrlParser
 from rewards import (
     PAD_TOKEN,
     format_reward_func,
-    final_state_correct_reward_func,
+    subset_correct_reward_func,
     token_count_reward_func,
 )
 
@@ -51,96 +51,78 @@ class PTConfig:
     {{- '<|im_start|>assistant\n' -}}
 {%- endif -%}"""
     )
-    dataset_name: str = field(default="./data/fsm_s3-10_l5-20_n10000")
+    dataset_name: str = field(default="./data/subset_sum_l5-15_s2-10_n10000")
     dataset_subset: str = field(default=None)
     name: str = field(
         default="forescore",
     )
     system_prompt: str = field(
-        default="""You are an expert at simulating finite state machines (FSMs). When given an FSM definition in DOT notation and a sequence of inputs, you need to determine the final state after processing the entire sequence.
+        default="""You are an expert at solving subset sum problems. When given a list of numbers and a target sum, you need to find which subset of those numbers adds up to exactly the target.
 
 Think through the problem step-by-step:
-1. Identify the initial state (marked by Start arrow)
-2. Process each input symbol one at a time
-3. Follow the transitions according to the FSM's edge labels
-4. Track your current state after each transition
+1. Understand the available numbers and the target sum
+2. Consider which numbers might combine to reach the target
+3. Verify that your chosen subset sums to exactly the target
+4. Present your answer as a list of the numbers in the subset
 
 Here's an example showing the input format and required response:
 
 Input:
-digraph FSM {
-  rankdir=LR;
-  node [shape=circle];
+Given the list: [3, 7, 12, 25, 45, 70]
 
-  Start [shape=point];
-  Start -> s1;
+Find a subset that sums to 82
 
-  s1 -> s2 [label="a"];
-  s1 -> s3 [label="b"];
-  s2 -> s1 [label="a"];
-  s2 -> s4 [label="b"];
-  s3 -> s4 [label="a"];
-  s3 -> s1 [label="b"];
-  s4 -> s3 [label="a"];
-  s4 -> s2 [label="b"];
-}
-
-Starting from the initial state, process this sequence of inputs:
-b, a, b, a, b
-
-What is the final state?
+What subset of numbers sums to exactly 82?
 
 Response:
 <think>
-Looking at the FSM:
-- Initial state: Start → s1
-- Transitions define how each state responds to inputs 'a' and 'b'
+I need to find numbers from [3, 7, 12, 25, 45, 70] that sum to 82.
 
-Processing the sequence: b, a, b, a, b
+Let me work through this systematically:
+- The largest number is 70, so I likely need that: 70 leaves 12 remaining
+- From the remaining numbers [3, 7, 12, 25, 45], I need a subset summing to 12
+- I can use 12 directly: 70 + 12 = 82
 
-Step 1: Start at s1
-Step 2: Input 'b' → s1 -> s3 [label="b"] → now at s3
-Step 3: Input 'a' → s3 -> s4 [label="a"] → now at s4
-Step 4: Input 'b' → s4 -> s2 [label="b"] → now at s2
-Step 5: Input 'a' → s2 -> s1 [label="a"] → now at s1
-Step 6: Input 'b' → s1 -> s3 [label="b"] → now at s3
+Let me verify: 70 + 12 = 82 ✓
 
-Final state after processing all inputs: s3
+The subset is [12, 70]
 </think>
-<answer>s3</answer>
+<answer>[12, 70]</answer>
 
 Your response MUST follow this XML format:
 <think>
-[Your step-by-step reasoning here - trace through each state transition]
+[Your step-by-step reasoning here - show your work finding the subset]
 </think>
 <answer>
-[Final state name, e.g., s1, s2, s3, etc.]
+[The subset that sums to the target, e.g., [3, 7, 12] or in comma-separated format: 3, 7, 12]
 </answer>
 
-Be thorough in your thinking process, showing each state transition clearly.
+Be thorough in your thinking process, showing how you determined which numbers to include.
 """
     )
 
 
 def make_conv_for_grpo(example, system_prompt):
     """
-    Prepare FSM traversal examples for GRPO training.
+    Prepare subset sum examples for GRPO training.
 
     Expected example fields from dataset:
-    - problem: Full FSM problem statement (DOT + sequence + question)
-    - final_state: Ground truth final state
-    - trace: List of states visited (for debugging)
-    - sequence: Input sequence as list
+    - problem: Subset sum problem statement
+    - numbers: List of available numbers
+    - target: Target sum to find
+    - solution: One valid subset that sums to target (for reference)
     """
     problem = example["problem"]
-    final_state = example["final_state"]
+    numbers = example["numbers"]
+    target = example["target"]
 
     return {
         "prompt": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": problem},
         ],
-        "final_state": final_state,
+        "numbers": numbers,
+        "target": target,
     }
 
 
@@ -227,7 +209,7 @@ def main():
         processing_class=tokenizer,
         reward_funcs=[
             format_reward_func,
-            final_state_correct_reward_func,
+            subset_correct_reward_func,
             token_count_reward_func,
         ],
         args=training_args,

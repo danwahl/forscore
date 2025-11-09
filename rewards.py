@@ -1,5 +1,6 @@
 import xml.etree.ElementTree as ET
 import math
+import re
 
 PAD_TOKEN = "<|fim_pad|>"
 
@@ -27,6 +28,37 @@ def parse_full_response(text: str) -> dict:
         return None
 
 
+def parse_subset_from_answer(answer_text: str) -> list[int]:
+    """
+    Parse subset from answer text.
+
+    Accepts multiple formats:
+    - List format: [3, 7, 12] or [3,7,12]
+    - Comma-separated: 3, 7, 12 or 3,7,12
+    - Space-separated: 3 7 12
+
+    Returns:
+        List of integers or None if invalid
+    """
+    if not answer_text:
+        return None
+
+    # Remove whitespace
+    text = answer_text.strip()
+
+    # Try list format first - remove brackets
+    if text.startswith('[') and text.endswith(']'):
+        text = text[1:-1]
+
+    # Try to extract all numbers using regex
+    try:
+        # Find all integers in the string
+        numbers = [int(x) for x in re.findall(r'-?\d+', text)]
+        return numbers if numbers else None
+    except (ValueError, AttributeError):
+        return None
+
+
 def format_reward_func(completions, **kwargs) -> list[float]:
     """Reward for proper XML format with think and answer blocks."""
     responses = [completion[0]["content"] for completion in completions]
@@ -48,24 +80,55 @@ def format_reward_func(completions, **kwargs) -> list[float]:
     return results
 
 
-def final_state_correct_reward_func(
-    prompts, completions, final_state, **kwargs
+def subset_correct_reward_func(
+    prompts, completions, target, numbers, **kwargs
 ) -> list[float]:
-    """Reward for predicting the correct final state."""
+    """
+    Reward for finding a valid subset that sums to target.
+
+    Checks:
+    1. All elements in answer are from the original list
+    2. Sum of answer equals target
+    3. No duplicates in answer (each element used at most once)
+
+    This works regardless of whether the solution is unique.
+    """
     responses = [completion[0]["content"] for completion in completions]
     results = []
 
-    for response, target_state in zip(responses, final_state):
+    for response, target_sum, number_list in zip(responses, target, numbers):
         parsed = parse_full_response(response)
         if parsed is None or parsed["answer"] is None:
             results.append(0.0)
         else:
-            try:
-                # Exact match for final state
-                predicted_state = parsed["answer"]
-                results.append(1.0 if predicted_state == target_state else 0.0)
-            except Exception:
+            predicted_subset = parse_subset_from_answer(parsed["answer"])
+            if predicted_subset is None or len(predicted_subset) == 0:
                 results.append(0.0)
+            else:
+                try:
+                    # Check validity:
+                    # 1. All numbers in predicted subset are from the original list
+                    # 2. No duplicates (each number used at most once)
+                    # 3. Sum equals target
+
+                    # Count occurrences in both lists
+                    from collections import Counter
+                    predicted_counts = Counter(predicted_subset)
+                    available_counts = Counter(number_list)
+
+                    # Check all predicted numbers are available
+                    all_available = all(
+                        predicted_counts[num] <= available_counts[num]
+                        for num in predicted_counts
+                    )
+
+                    # Check sum
+                    correct_sum = sum(predicted_subset) == target_sum
+
+                    is_valid = all_available and correct_sum
+                    results.append(1.0 if is_valid else 0.0)
+                except Exception:
+                    results.append(0.0)
 
     return results
 
